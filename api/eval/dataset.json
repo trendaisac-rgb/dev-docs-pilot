@@ -1,0 +1,152 @@
+{
+  "name": "anthropic-docs-v2",
+  "description": "15 Q/A pairs over the canonical Anthropic developer docs. URLs follow the .md convention published at /llms.txt (May 2026). Each item has the question, a one-sentence ground truth, and the canonical URL(s) the agent should cite. URLs are used for retrieval precision/recall. Ground truth is used by the LLM-as-judge for factuality + completeness.",
+  "notes": "Anthropic recently moved their canonical docs from docs.anthropic.com (now JS-rendered) to platform.claude.com, with .md endpoints exposed at /docs/en/.../<page>.md. This dataset reflects that.",
+  "items": [
+    {
+      "id": "Q01",
+      "question": "What context window does Claude Sonnet support and how is it documented?",
+      "ground_truth": "Claude Sonnet supports a 200K (200,000) token context window; context window sizing and behavior is documented on the Context windows page.",
+      "expected_urls": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows.md"
+      ],
+      "category": "factual-lookup"
+    },
+    {
+      "id": "Q02",
+      "question": "How do I stream a response from the Messages API in Python?",
+      "ground_truth": "Set stream=true on the Messages API call (or use client.messages.stream() as a context manager in the Python SDK) and iterate the server-sent event stream of content_block_delta events to assemble the response.",
+      "expected_urls": [
+        "https://platform.claude.com/docs/en/build-with-claude/streaming.md",
+        "https://platform.claude.com/docs/en/api/messages.md"
+      ],
+      "category": "how-to"
+    },
+    {
+      "id": "Q03",
+      "question": "What is the difference between tool_use and tool_result content blocks?",
+      "ground_truth": "tool_use is emitted by the assistant when it wants to invoke a tool (carries name + input + tool_use_id); tool_result is sent back by the user/client in the following turn (carries tool_use_id + content) so the model can continue.",
+      "expected_urls": [
+        "https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview.md"
+      ],
+      "category": "concept"
+    },
+    {
+      "id": "Q04",
+      "question": "How does prompt caching work and what content can be cached?",
+      "ground_truth": "Mark content blocks with cache_control: {type: 'ephemeral'} to cache prefixes; cached prefixes are reused across subsequent requests with significant cost and latency savings on cache hits.",
+      "expected_urls": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md"
+      ],
+      "category": "factual-lookup"
+    },
+    {
+      "id": "Q05",
+      "question": "What is a Claude Managed Agent and how is it different from a single Messages API call?",
+      "ground_truth": "Managed Agents are server-side autonomous agents managed by Anthropic that handle session state, tool execution, and multi-turn loops on your behalf, contrasted with stateless Messages API calls that require the client to drive each turn.",
+      "expected_urls": [
+        "https://platform.claude.com/docs/en/managed-agents/overview.md",
+        "https://platform.claude.com/docs/en/managed-agents/quickstart.md"
+      ],
+      "category": "concept"
+    },
+    {
+      "id": "Q06",
+      "question": "What tool_choice options does the Messages API support?",
+      "ground_truth": "auto (default, model decides), any (force the model to use one of the provided tools), tool (force use of a specific named tool), and none (disable tool use).",
+      "expected_urls": [
+        "https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview.md",
+        "https://platform.claude.com/docs/en/api/messages.md"
+      ],
+      "category": "factual-lookup"
+    },
+    {
+      "id": "Q07",
+      "question": "Show me a minimal Python example of calling Claude with the official SDK.",
+      "ground_truth": "Install the anthropic package, instantiate Anthropic() (reads ANTHROPIC_API_KEY from env), then call client.messages.create(model=..., max_tokens=..., messages=[{role:'user', content:'...'}]) and read response.content.",
+      "expected_urls": [
+        "https://platform.claude.com/docs/en/get-started.md",
+        "https://platform.claude.com/docs/en/intro.md"
+      ],
+      "category": "how-to"
+    },
+    {
+      "id": "Q08",
+      "question": "What does the max_tokens parameter do and what happens if it's set to 0?",
+      "ground_truth": "max_tokens caps the response length. Setting it to 0 pre-warms the prompt cache without generating a response.",
+      "expected_urls": [
+        "https://platform.claude.com/docs/en/api/messages.md",
+        "https://platform.claude.com/docs/en/api/messages/create.md"
+      ],
+      "category": "factual-lookup"
+    },
+    {
+      "id": "Q09",
+      "question": "How do I enable extended thinking on a request?",
+      "ground_truth": "Set thinking={type:'enabled', budget_tokens:N} on the Messages API call; the response will include thinking content blocks alongside the text blocks, capped at the requested token budget.",
+      "expected_urls": [
+        "https://platform.claude.com/docs/en/build-with-claude/extended-thinking.md",
+        "https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking.md"
+      ],
+      "category": "how-to"
+    },
+    {
+      "id": "Q10",
+      "question": "How are API rate limits structured and how can I check my current rate limit headroom?",
+      "ground_truth": "Rate limits are per-tier and per-model; the response includes anthropic-ratelimit-* headers and you can query org/workspace rate limits via the admin endpoints.",
+      "expected_urls": [
+        "https://platform.claude.com/docs/en/manage-claude/rate-limits-api.md"
+      ],
+      "category": "factual-lookup"
+    },
+    {
+      "id": "Q11",
+      "question": "How are PDF inputs handled by Claude?",
+      "ground_truth": "PDFs are passed as document content blocks (base64 or URL); Claude processes both text and visual content from each page.",
+      "expected_urls": [
+        "https://platform.claude.com/docs/en/build-with-claude/pdf-support.md"
+      ],
+      "category": "how-to"
+    },
+    {
+      "id": "Q12",
+      "question": "What is the MCP connector and what does it let me do?",
+      "ground_truth": "The MCP connector lets the Anthropic API call out to Model Context Protocol servers (local or remote) as tools, so Claude can invoke any MCP-exposed tool inline during a conversation.",
+      "expected_urls": [
+        "https://platform.claude.com/docs/en/agents-and-tools/mcp-connector.md",
+        "https://platform.claude.com/docs/en/agents-and-tools/remote-mcp-servers.md"
+      ],
+      "category": "concept"
+    },
+    {
+      "id": "Q13",
+      "question": "What stop_reason values can the Messages API return and what do they mean?",
+      "ground_truth": "Common stop_reason values: end_turn (model finished), max_tokens (response truncated by the cap), stop_sequence (matched a configured stop string), tool_use (model wants to call a tool), and refusal where applicable.",
+      "expected_urls": [
+        "https://platform.claude.com/docs/en/api/messages.md",
+        "https://platform.claude.com/docs/en/api/messages/create.md"
+      ],
+      "category": "edge-case"
+    },
+    {
+      "id": "Q14",
+      "question": "Is there a way to do batch inference and what's the discount or SLA?",
+      "ground_truth": "Yes — the Message Batches API runs up to 100,000 messages asynchronously with a 50% discount and a 24-hour SLA.",
+      "expected_urls": [
+        "https://platform.claude.com/docs/en/build-with-claude/batch-processing.md",
+        "https://platform.claude.com/docs/en/api/messages/batches.md"
+      ],
+      "category": "factual-lookup"
+    },
+    {
+      "id": "Q15",
+      "question": "How should I think about choosing a Claude model for cost and latency?",
+      "ground_truth": "Use Haiku for low-latency / high-volume use cases, Sonnet for balanced reasoning + cost, Opus for hardest reasoning; choice is documented alongside model overviews and the intro pages.",
+      "expected_urls": [
+        "https://platform.claude.com/docs/en/intro.md",
+        "https://platform.claude.com/docs/en/get-started.md"
+      ],
+      "category": "factual-lookup"
+    }
+  ]
+}

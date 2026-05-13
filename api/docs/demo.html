@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>docs-agent demo</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+    max-width: 760px; margin: 40px auto; padding: 0 16px;
+  }
+  textarea {
+    width: 100%; min-height: 90px; padding: 10px;
+    font: 14px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  button { padding: 8px 14px; font-size: 15px; cursor: pointer; }
+  #out {
+    white-space: pre-wrap; padding: 14px; margin-top: 16px;
+    background: #f6f7f9; border-radius: 6px;
+    font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    #out { background: #1c1f24; }
+  }
+  .meta { color: #888; font-size: 13px; margin-top: 4px; }
+  .tool { color: #b88; }
+</style>
+</head>
+<body>
+  <h1>docs-agent demo</h1>
+  <p class="meta">Hits <code>POST /chat</code> on the local FastAPI server. Streams SSE events.</p>
+
+  <textarea id="q" placeholder="Ask a question about Anthropic docs…">How do I stream a response from the Messages API in Python?</textarea>
+  <p>
+    <button id="go">Ask</button>
+    <span class="meta">Session: <span id="sid">(new)</span></span>
+  </p>
+  <div id="out"></div>
+
+<script>
+const out = document.getElementById("out");
+const sidEl = document.getElementById("sid");
+let sessionId = null;
+
+document.getElementById("go").onclick = async () => {
+  const q = document.getElementById("q").value.trim();
+  if (!q) return;
+  out.textContent = "";
+  const res = await fetch("/chat", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({question: q, session_id: sessionId}),
+  });
+  if (!res.ok) {
+    out.textContent = "Error: " + res.status;
+    return;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const {value, done} = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, {stream: true});
+    const events = buf.split("\n\n");
+    buf = events.pop();
+    for (const ev of events) {
+      if (!ev.trim()) continue;
+      const lines = ev.split("\n");
+      const eventName = (lines.find(l => l.startsWith("event:")) || "").slice(6).trim();
+      const dataLine  = (lines.find(l => l.startsWith("data:"))  || "").slice(5).trim();
+      let data = {};
+      try { data = JSON.parse(dataLine); } catch {}
+      if (eventName === "meta") {
+        sessionId = data.session_id;
+        sidEl.textContent = sessionId;
+      } else if (eventName === "token") {
+        out.append(document.createTextNode(data.token || ""));
+      } else if (eventName === "tool_use") {
+        const span = document.createElement("span");
+        span.className = "tool";
+        span.textContent = `\n[tool: ${data.tool}]\n`;
+        out.appendChild(span);
+      } else if (eventName === "error") {
+        out.append(document.createTextNode("\n[error] " + (data.message || "")));
+      }
+    }
+  }
+};
+</script>
+</body>
+</html>

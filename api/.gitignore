@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.python-version-local
+
+# uv
+uv.lock
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Eval outputs (regenerated each run)
+eval/runs/
+eval/report_*.md
+!eval/report_template.md
+
+# Ingest cache (regenerated)
+.ingest_cache/
+
+# Logs
+*.log

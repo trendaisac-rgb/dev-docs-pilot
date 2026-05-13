@@ -1,0 +1,97 @@
+[project]
+name = "docs-agent"
+version = "0.1.0"
+description = "RAG agent over Anthropic docs with Claude Managed Agent, pgvector, and LLM-as-judge evaluation. Built for the Cloud Employee Senior AI Builder assessment."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Doug" }]
+
+dependencies = [
+    # Anthropic stack
+    "anthropic>=0.39.0",
+    "claude-agent-sdk>=0.1.0",
+    # API layer
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "sse-starlette>=2.1.3",
+    # Data + DB
+    "supabase>=2.9.0",
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.5.0",
+    # Embeddings (OpenAI) — Voyage would be the prod upgrade; see README
+    "openai>=1.50.0",
+    # Ingestion
+    "httpx>=0.27.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.3.0",
+    "tiktoken>=0.8.0",
+    "markdownify>=0.13.0",
+    # CLI / DX
+    "typer>=0.12.5",
+    "rich>=13.9.0",
+    "python-dotenv>=1.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.3",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.7.0",
+    "mypy>=1.13.0",
+    "httpx>=0.27.0",  # for TestClient
+]
+
+[project.scripts]
+docs-agent-ingest = "docs_agent.ingest.main:app"
+docs-agent-eval = "eval.run_eval:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/docs_agent"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.uv]
+package = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # bugbear
+    "UP",  # pyupgrade
+    "SIM", # simplify
+    "RUF", # ruff-specific
+]
+ignore = [
+    "E501",   # line length — formatter handles
+    "RUF001", # ambiguous unicode in strings (we use › / — / – intentionally in UX strings)
+    "RUF002", # same, docstrings
+    "RUF003", # same, comments
+    "B008",   # typer.Option() in defaults is THE Typer pattern
+    "SIM105", # try/except/pass is fine and arguably more explicit than contextlib.suppress
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true
