@@ -8,7 +8,7 @@ import { MessageBubble } from "@/components/MessageBubble";
 import { SourcesPanel } from "@/components/SourcesPanel";
 import { Composer } from "@/components/Composer";
 import { SettingsSheet } from "@/components/SettingsSheet";
-import { Sidebar } from "@/components/Sidebar";
+import { Sidebar, EXAMPLES } from "@/components/Sidebar";
 import type { Message, Citation, Conversation, TraceStep } from "@/lib/types";
 import { extractCitations } from "@/lib/citations";
 import { streamSSE } from "@/lib/sse";
@@ -589,9 +589,28 @@ function Welcome({ onPick }: { onPick: (q: string) => void }) {
         A focused agent grounded in the official developer documentation. Watch it search,
         re-rank, and cite — every answer is traceable.
       </p>
-      <p className="mt-6 max-w-md text-xs text-muted-foreground/70">
+      {/* Desktop carries the examples in the sidebar; mobile has no
+          sidebar, so surface them on the welcome screen. */}
+      <p className="mt-6 hidden max-w-md text-xs text-muted-foreground/70 md:block">
         Pick a question from the sidebar, or type your own below.
       </p>
+      <div className="mt-6 w-full max-w-md md:hidden">
+        <div className="mb-2 px-1 text-left font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+          Try asking
+        </div>
+        <ul className="space-y-1.5">
+          {EXAMPLES.map((q) => (
+            <li key={q}>
+              <button
+                onClick={() => onPick(q)}
+                className="w-full rounded-md border border-border bg-card px-3 py-2 text-left text-xs leading-snug text-muted-foreground transition-colors hover:border-primary/40 hover:bg-accent hover:text-foreground"
+              >
+                {q}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }

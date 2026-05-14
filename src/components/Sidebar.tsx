@@ -17,7 +17,7 @@ import {
 
 // Drawn from the eval dataset so the questions a reviewer clicks are exactly
 // the ones the eval harness measured — see api/eval/dataset.json.
-const EXAMPLES = [
+export const EXAMPLES = [
   "How do I stream a response from the Messages API in Python?",
   "What's the difference between tool_use and tool_result content blocks?",
   "How does prompt caching work and what content can be cached?",
