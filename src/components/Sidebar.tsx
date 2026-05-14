@@ -15,11 +15,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+// Drawn from the eval dataset so the questions a reviewer clicks are exactly
+// the ones the eval harness measured — see api/eval/dataset.json.
 const EXAMPLES = [
   "How do I stream a response from the Messages API in Python?",
-  "What is the MCP connector and what can it do?",
-  "How does prompt caching work?",
-  "What's the difference between tool_use and tool_result?",
+  "What's the difference between tool_use and tool_result content blocks?",
+  "How does prompt caching work and what content can be cached?",
+  "What is a Claude Managed Agent and how is it different from a single Messages API call?",
+  "How do I enable extended thinking on a request?",
+  "What is the MCP connector and what does it let me do?",
+  "What stop_reason values can the Messages API return?",
+  "How should I think about choosing a Claude model for cost and latency?",
 ];
 
 interface Props {
