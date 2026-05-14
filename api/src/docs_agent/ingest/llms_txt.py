@@ -104,7 +104,9 @@ class LlmsTxtIngester:
         self.url_filter = url_filter
 
     async def _fetch_index(self, client: httpx.AsyncClient) -> list[tuple[str, str]]:
-        res = await client.get(self.index_url)
+        # follow_redirects is critical: docs.anthropic.com/llms.txt 301s to
+        # platform.claude.com/docs/llms.txt as of May 2026.
+        res = await client.get(self.index_url, follow_redirects=True)
         res.raise_for_status()
         return parse_llms_txt(res.text)
 
@@ -152,7 +154,9 @@ class LlmsTxtIngester:
 
 
 # Sensible default index URLs for well-known docs sites.
+# Note: docs.anthropic.com/llms.txt 301s to platform.claude.com/docs/llms.txt
+# as of May 2026 — we point straight at the canonical URL to skip a redirect.
 KNOWN_INDEX_URLS: dict[str, str] = {
-    "anthropic-docs": "https://docs.anthropic.com/llms.txt",
-    "claude-platform": "https://platform.claude.com/llms.txt",
+    "anthropic-docs": "https://platform.claude.com/docs/llms.txt",
+    "claude-platform": "https://platform.claude.com/docs/llms.txt",
 }

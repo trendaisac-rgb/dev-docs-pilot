@@ -1,0 +1,14 @@
+{
+  "imports": {
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2.45.1",
+    "@anthropic-ai/sdk": "npm:@anthropic-ai/sdk@0.39.0",
+    "openai": "npm:openai@4.65.0"
+  },
+  "tasks": {
+    "serve": "supabase functions serve chat --no-verify-jwt"
+  },
+  "compilerOptions": {
+    "lib": ["deno.window"],
+    "strict": true
+  }
+}

@@ -1,4 +1,5 @@
 // Manual SSE parser over fetch+ReadableStream (so we can POST a body).
+// EventSource can't POST, so we drive the stream by hand.
 
 export type SSEEvent = { event: string; data: string };
 
@@ -6,12 +7,14 @@ export async function* streamSSE(
   url: string,
   body: unknown,
   signal?: AbortSignal,
+  extraHeaders?: Record<string, string>,
 ): AsyncGenerator<SSEEvent> {
   const res = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Accept: "text/event-stream",
+      ...extraHeaders,
     },
     body: JSON.stringify(body),
     signal,

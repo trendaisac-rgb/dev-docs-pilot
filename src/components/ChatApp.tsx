@@ -10,6 +10,7 @@ import { SettingsSheet } from "@/components/SettingsSheet";
 import type { Message, Citation } from "@/lib/types";
 import { extractCitations } from "@/lib/citations";
 import { streamSSE } from "@/lib/sse";
+import { FUNCTIONS_BASE, SUPABASE_HEADERS } from "@/lib/config";
 
 const EXAMPLES = [
   "How do I stream a response from the Messages API in Python?",
@@ -41,8 +42,10 @@ const uid = () =>
 
 export function ChatApp() {
   const [isDark, setIsDark] = useState(true);
-  const [backendUrl, setBackendUrl] = useState("http://localhost:8000");
-  const [useStreaming, setUseStreaming] = useState(true);
+  // Default backend = the Supabase Edge Function base. The chat function
+  // lives at `${backendUrl}/chat`. Overridable in Settings for local
+  // `supabase functions serve` development.
+  const [backendUrl, setBackendUrl] = useState(FUNCTIONS_BASE);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [messages, dispatch] = useReducer(reducer, []);
@@ -69,8 +72,13 @@ export function ChatApp() {
   }, []);
 
   const ping = useCallback(async () => {
+    // The Edge Function has no /healthz route — a CORS preflight (OPTIONS)
+    // on /chat returns 200 "ok" and proves the function is reachable.
     try {
-      const res = await fetch(`${backendUrl}/healthz`, { method: "GET" });
+      const res = await fetch(`${backendUrl}/chat`, {
+        method: "OPTIONS",
+        headers: SUPABASE_HEADERS,
+      });
       setConnected(res.ok);
     } catch {
       setConnected(false);
@@ -97,19 +105,14 @@ export function ChatApp() {
     return [];
   }, [messages]);
 
-  const handleClear = useCallback(async () => {
+  const handleClear = useCallback(() => {
+    // The Edge Function is stateless — sessions aren't persisted server-side
+    // (history is passed per-request). Clearing is a pure client-side reset.
     abortRef.current?.abort();
-    if (sessionId) {
-      try {
-        await fetch(`${backendUrl}/session/${sessionId}`, { method: "DELETE" });
-      } catch {
-        // ignore
-      }
-    }
     setSessionId(null);
     dispatch({ type: "reset" });
     setStreaming(false);
-  }, [backendUrl, sessionId]);
+  }, []);
 
   const tokenBuffersRef = useRef<Map<string, string>>(new Map());
   const appendToken = useCallback((id: string, token: string) => {
@@ -152,11 +155,12 @@ export function ChatApp() {
       abortRef.current = ac;
 
       try {
-        if (useStreaming) {
+        {
           const events = streamSSE(
             `${backendUrl}/chat`,
             { question: trimmed, session_id: sessionId },
             ac.signal,
+            SUPABASE_HEADERS,
           );
           for await (const ev of events) {
             let payload: any = {};
@@ -199,38 +203,6 @@ export function ChatApp() {
                 break;
             }
           }
-        } else {
-          const res = await fetch(`${backendUrl}/ask`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ question: trimmed, session_id: sessionId }),
-            signal: ac.signal,
-          });
-          if (!res.ok) {
-            if (res.status === 429) toast.error("Rate limit — try again in a moment");
-            else toast.error(`Backend error ${res.status}`);
-            dispatch({
-              type: "patch",
-              id: assistantId,
-              patch: {
-                streaming: false,
-                error: `I hit an error (${res.status}). Try again or check the backend logs.`,
-              },
-            });
-            return;
-          }
-          const json = await res.json();
-          if (json.session_id) setSessionId(json.session_id);
-          const cites: Citation[] = (json.citations ?? []).map((c: any, i: number, arr: any[]) => ({
-            title: c.title,
-            url: c.url,
-            relevance: arr.length === 1 ? 1 : 1 - (i / (arr.length - 1)) * 0.7,
-          }));
-          dispatch({
-            type: "patch",
-            id: assistantId,
-            patch: { content: json.answer ?? "", streaming: false, citations: cites },
-          });
         }
       } catch (err: any) {
         if (err?.name === "AbortError") return;
@@ -242,13 +214,15 @@ export function ChatApp() {
             error: "I hit an error. Try again or check the backend logs.",
           },
         });
-        toast.error(`Can't reach backend at ${backendUrl}. Check that uvicorn is running.`);
+        toast.error(
+          `Can't reach the chat function at ${backendUrl}/chat. Check the Edge Function is deployed and its secrets are set.`,
+        );
         setConnected(false);
       } finally {
         setStreaming(false);
       }
     },
-    [backendUrl, sessionId, streaming, useStreaming, appendToken, finalizeCitations],
+    [backendUrl, sessionId, streaming, appendToken, finalizeCitations],
   );
 
   const empty = messages.length === 0;
@@ -341,8 +315,6 @@ export function ChatApp() {
         onOpenChange={setSettingsOpen}
         backendUrl={backendUrl}
         onBackendUrlChange={setBackendUrl}
-        useStreaming={useStreaming}
-        onUseStreamingChange={setUseStreaming}
       />
     </TooltipProvider>
   );
