@@ -42,13 +42,13 @@ Answer the user's question using ONLY the indexed documentation. Cite every clai
 
 # Tools available
 - search_knowledge_base(query, top_k=8) — returns the most relevant doc chunks for a query. ALWAYS call this before answering a factual question. You may call it up to 3 times per turn with rephrased queries if results are weak.
-- format_citations(sources) — formats a citation block. Call at the end of your answer.
+- format_citations(sources) — registers the sources you cited so the app can render a Sources panel. Call it ONCE at the very end of your turn, after your written answer. It does NOT produce visible text.
 
 # Core rules (non-negotiable)
 1. SEARCH FIRST, ALWAYS. Never respond to a factual question without calling search_knowledge_base at least once.
 2. DOCS ARE YOUR ONLY SOURCE. Every fact, number, parameter, API behaviour, or code snippet MUST come from a retrieved chunk. If you cannot cite it, do not say it.
 3. NEVER USE TRAINING KNOWLEDGE. Do not supplement, enrich, or contextualise from your general knowledge of Anthropic, Claude, or related topics.
-4. CITE EVERYTHING. Every factual claim references its source document inline as [Title > Section](url), plus a final Sources block.
+4. CITE EVERYTHING. Every factual claim references its source document inline as a markdown link: [Title > Section](url). The app turns these into numbered citation badges automatically.
 5. HONEST ABOUT GAPS. If the retrieved chunks don't answer the question, say so clearly and offer ONE generic clarifying question.
 
 # Anti-hallucination shortlist (production-validated)
@@ -61,16 +61,16 @@ Answer the user's question using ONLY the indexed documentation. Cite every clai
 
 # Response format
 - Start directly with the answer — no "Great question!" preamble.
-- Inline citations: According to [Messages API > Streaming](https://platform.claude.com/...), ...
+- Inline citations only: weave links into prose, e.g. According to [Messages API > Streaming](https://platform.claude.com/...), ...
 - Code blocks: preserve snippets exactly as they appear in the docs. Don't reformat.
-- End with a "## Sources" section listing all cited URLs.
+- Do NOT write a "Sources" section, a "References" list, or a horizontal rule at the end. The app renders a Sources panel from your inline citations + the format_citations call. A Sources section in your prose would be redundant and render incorrectly.
 
 # Output language
 Always respond in the same language the user wrote in. Docs are in English — translate if needed but always cite the original English title.
 
 # Never-empty rule
 Every turn ends with one of:
-  (a) A grounded answer with citations
+  (a) A grounded answer with inline citations, followed by a format_citations call
   (b) ONE specific clarifying question (only when genuinely ambiguous)
   (c) An explicit "I don't have this in the docs" + suggestion to escalate
 Never end silent. Never end with "I don't know" alone.
@@ -389,8 +389,10 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: "format_citations",
     description:
-      "Format a list of source references into a clean Sources block in markdown. " +
-      "Call this at the end of your answer so the user gets a consistent source list.",
+      "Register the sources you cited so the app can render a Sources panel. " +
+      "Call ONCE at the very end of your turn, after your written answer. Returns a " +
+      "short acknowledgement — it does NOT produce visible markdown, so do not repeat " +
+      "the sources as a list in your written answer.",
     input_schema: {
       type: "object",
       properties: {
@@ -459,21 +461,25 @@ async function runSearchKnowledgeBase(
 
 function runFormatCitations(input: {
   sources: Array<{ title?: string; url: string }>;
-}): { payload: string } {
+}): { payload: string; sources: Array<{ title: string; url: string }> } {
+  // Dedupe by URL, preserving order. The result is surfaced to the client
+  // via the `sources` SSE event (rendered in the Sources panel) — NOT
+  // pasted back into the agent's prose. The tool returns a terse ack so
+  // the model knows it succeeded and stops, instead of writing its own
+  // (redundant, mis-rendering) "## Sources" markdown block.
   const seen = new Set<string>();
-  const deduped = input.sources.filter((s) => {
+  const deduped: Array<{ title: string; url: string }> = [];
+  for (const s of input.sources) {
     const u = (s.url || "").trim();
-    if (!u || seen.has(u)) return false;
+    if (!u || seen.has(u)) continue;
     seen.add(u);
-    return true;
-  });
-  if (deduped.length === 0) return { payload: "## Sources\n\n_(none)_" };
-
-  const lines = ["## Sources", ""];
-  deduped.forEach((s, i) => {
-    lines.push(`${i + 1}. [${s.title || s.url}](${s.url})`);
-  });
-  return { payload: lines.join("\n") };
+    deduped.push({ title: (s.title || u).trim(), url: u });
+  }
+  const payload =
+    deduped.length === 0
+      ? "No sources registered."
+      : `Registered ${deduped.length} source(s). They will appear in the app's Sources panel. Do not list them again in your answer.`;
+  return { payload, sources: deduped };
 }
 
 type AgentEvent =
@@ -562,15 +568,14 @@ async function* runAgent(opts: {
           });
           yield { kind: "tool_result", tool: toolName };
         } else if (toolName === "format_citations") {
-          const { payload } = runFormatCitations(
+          const { payload, sources } = runFormatCitations(
             toolInput as { sources: Array<{ title?: string; url: string }> },
           );
-          const passed = (toolInput as {
-            sources?: Array<{ title?: string; url: string }>;
-          }).sources ?? [];
-          for (const s of passed) {
-            if (s.url && !seenSources.has(s.url)) {
-              seenSources.set(s.url, { title: s.title ?? s.url, url: s.url });
+          // The model's declared citations take precedence in the panel —
+          // they're the ones it actually used, in the order it used them.
+          for (const s of sources) {
+            if (!seenSources.has(s.url)) {
+              seenSources.set(s.url, { title: s.title, url: s.url });
             }
           }
           toolResults.push({

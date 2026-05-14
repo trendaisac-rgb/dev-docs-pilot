@@ -7,38 +7,73 @@ import { MessageBubble } from "@/components/MessageBubble";
 import { SourcesPanel } from "@/components/SourcesPanel";
 import { Composer } from "@/components/Composer";
 import { SettingsSheet } from "@/components/SettingsSheet";
-import type { Message, Citation } from "@/lib/types";
+import { Sidebar } from "@/components/Sidebar";
+import type { Message, Citation, Conversation, TraceStep } from "@/lib/types";
 import { extractCitations } from "@/lib/citations";
 import { streamSSE } from "@/lib/sse";
 import { FUNCTIONS_BASE, SUPABASE_HEADERS } from "@/lib/config";
-
-const EXAMPLES = [
-  "How do I stream a response from the Messages API in Python?",
-  "What is the MCP connector and what can it do?",
-  "How does prompt caching work?",
-  "What's the difference between tool_use and tool_result?",
-];
-
-type Action =
-  | { type: "add"; message: Message }
-  | { type: "patch"; id: string; patch: Partial<Message> }
-  | { type: "reset" };
-
-function reducer(state: Message[], action: Action): Message[] {
-  switch (action.type) {
-    case "add":
-      return [...state, action.message];
-    case "patch":
-      return state.map((m) => (m.id === action.id ? { ...m, ...action.patch } : m));
-    case "reset":
-      return [];
-  }
-}
 
 const uid = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : Math.random().toString(36).slice(2);
+
+// ── Conversation state ──────────────────────────────────────────────
+// Multiple in-memory conversations. The Edge Function is stateless, so
+// "history" lives here for the session — no browser storage needed.
+
+type CState = { conversations: Conversation[]; activeId: string };
+type CAction =
+  | { type: "new" }
+  | { type: "select"; id: string }
+  | { type: "addMsg"; message: Message }
+  | { type: "patchMsg"; id: string; patch: Partial<Message> }
+  | { type: "title"; title: string }
+  | { type: "session"; sessionId: string };
+
+function newConversation(): Conversation {
+  return {
+    id: uid(),
+    title: "New chat",
+    messages: [],
+    sessionId: null,
+    createdAt: Date.now(),
+  };
+}
+
+function reducer(state: CState, action: CAction): CState {
+  const patchActive = (fn: (c: Conversation) => Conversation): CState => ({
+    ...state,
+    conversations: state.conversations.map((c) =>
+      c.id === state.activeId ? fn(c) : c,
+    ),
+  });
+
+  switch (action.type) {
+    case "new": {
+      const conv = newConversation();
+      return { conversations: [conv, ...state.conversations], activeId: conv.id };
+    }
+    case "select":
+      return { ...state, activeId: action.id };
+    case "addMsg":
+      return patchActive((c) => ({ ...c, messages: [...c.messages, action.message] }));
+    case "patchMsg":
+      return patchActive((c) => ({
+        ...c,
+        messages: c.messages.map((m) =>
+          m.id === action.id ? { ...m, ...action.patch } : m,
+        ),
+      }));
+    case "title":
+      return patchActive((c) => ({
+        ...c,
+        title: c.title === "New chat" ? action.title : c.title,
+      }));
+    case "session":
+      return patchActive((c) => ({ ...c, sessionId: action.sessionId }));
+  }
+}
 
 export function ChatApp() {
   const [isDark, setIsDark] = useState(true);
@@ -48,9 +83,19 @@ export function ChatApp() {
   const [backendUrl, setBackendUrl] = useState(FUNCTIONS_BASE);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const [messages, dispatch] = useReducer(reducer, []);
+  const [state, dispatch] = useReducer(
+    reducer,
+    undefined,
+    (): CState => {
+      const conv = newConversation();
+      return { conversations: [conv], activeId: conv.id };
+    },
+  );
+  const active = state.conversations.find((c) => c.id === state.activeId)!;
+  const messages = active.messages;
+  const sessionId = active.sessionId;
+
   const [input, setInput] = useState("");
-  const [sessionId, setSessionId] = useState<string | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [connected, setConnected] = useState<boolean | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -105,26 +150,70 @@ export function ChatApp() {
     return [];
   }, [messages]);
 
-  const handleClear = useCallback(() => {
-    // The Edge Function is stateless — sessions aren't persisted server-side
-    // (history is passed per-request). Clearing is a pure client-side reset.
+  const handleNewChat = useCallback(() => {
     abortRef.current?.abort();
-    setSessionId(null);
-    dispatch({ type: "reset" });
     setStreaming(false);
+    dispatch({ type: "new" });
   }, []);
 
+  const handleSelectChat = useCallback(
+    (id: string) => {
+      abortRef.current?.abort();
+      setStreaming(false);
+      dispatch({ type: "select", id });
+    },
+    [],
+  );
+
+  // ── Token + trace accumulators (per assistant message id) ──────────
   const tokenBuffersRef = useRef<Map<string, string>>(new Map());
+  const traceRef = useRef<Map<string, TraceStep[]>>(new Map());
+
+  const commitTrace = useCallback((msgId: string) => {
+    const steps = (traceRef.current.get(msgId) ?? []).map((s) => ({ ...s }));
+    dispatch({ type: "patchMsg", id: msgId, patch: { trace: steps } });
+  }, []);
+
+  const traceEndRunning = useCallback(
+    (msgId: string, kinds?: TraceStep["kind"][]) => {
+      const steps = traceRef.current.get(msgId) ?? [];
+      for (const s of steps) {
+        if (s.status === "running" && (!kinds || kinds.includes(s.kind))) {
+          s.status = "done";
+          s.endedAt = Date.now();
+        }
+      }
+    },
+    [],
+  );
+
+  const tracePush = useCallback(
+    (msgId: string, kind: TraceStep["kind"], label: string, detail?: string) => {
+      const steps = traceRef.current.get(msgId) ?? [];
+      steps.push({
+        id: uid(),
+        kind,
+        label,
+        detail,
+        status: "running",
+        startedAt: Date.now(),
+      });
+      traceRef.current.set(msgId, steps);
+    },
+    [],
+  );
+
   const appendToken = useCallback((id: string, token: string) => {
     const cur = tokenBuffersRef.current.get(id) ?? "";
     const next = cur + token;
     tokenBuffersRef.current.set(id, next);
-    dispatch({ type: "patch", id, patch: { content: next, toolStatus: null } });
+    dispatch({ type: "patchMsg", id, patch: { content: next, toolStatus: null } });
   }, []);
+
   const finalizeCitations = useCallback((id: string) => {
     const content = tokenBuffersRef.current.get(id) ?? "";
     const cites = extractCitations(content);
-    dispatch({ type: "patch", id, patch: { citations: cites } });
+    dispatch({ type: "patchMsg", id, patch: { citations: cites } });
   }, []);
 
   const send = useCallback(
@@ -146,68 +235,126 @@ export function ChatApp() {
         createdAt: Date.now(),
         streaming: true,
       };
-      dispatch({ type: "add", message: userMsg });
-      dispatch({ type: "add", message: assistantMsg });
+      dispatch({ type: "addMsg", message: userMsg });
+      dispatch({ type: "title", title: trimmed.slice(0, 60) });
+      dispatch({ type: "addMsg", message: assistantMsg });
       setInput("");
       setStreaming(true);
 
+      // Seed the agent trace: every turn starts by understanding the question.
+      traceRef.current.set(assistantId, [
+        {
+          id: uid(),
+          kind: "intent",
+          label: "Understanding the question",
+          status: "running",
+          startedAt: Date.now(),
+        },
+      ]);
+      commitTrace(assistantId);
+
       const ac = new AbortController();
       abortRef.current = ac;
+      let composeStarted = false;
 
       try {
-        {
-          const events = streamSSE(
-            `${backendUrl}/chat`,
-            { question: trimmed, session_id: sessionId },
-            ac.signal,
-            SUPABASE_HEADERS,
-          );
-          for await (const ev of events) {
-            let payload: any = {};
-            try {
-              payload = ev.data ? JSON.parse(ev.data) : {};
-            } catch {
-              // ignore parse errors
-            }
-            switch (ev.event) {
-              case "meta":
-                if (payload.session_id) setSessionId(payload.session_id);
-                break;
-              case "tool_use":
-                dispatch({
-                  type: "patch",
-                  id: assistantId,
-                  patch: { toolStatus: { tool: payload.tool, input: payload.input } },
-                });
-                break;
-              case "token": {
-                const tok = payload.token ?? "";
-                appendToken(assistantId, tok);
-                break;
+        const events = streamSSE(
+          `${backendUrl}/chat`,
+          { question: trimmed, session_id: sessionId },
+          ac.signal,
+          SUPABASE_HEADERS,
+        );
+        for await (const ev of events) {
+          let payload: any = {};
+          try {
+            payload = ev.data ? JSON.parse(ev.data) : {};
+          } catch {
+            // ignore parse errors
+          }
+          switch (ev.event) {
+            case "meta":
+              if (payload.session_id) dispatch({ type: "session", sessionId: payload.session_id });
+              break;
+            case "tool_use": {
+              // First real signal — the agent finished understanding.
+              traceEndRunning(assistantId, ["intent"]);
+              if (payload.tool === "search_knowledge_base") {
+                const q = payload.input?.query ?? "";
+                tracePush(assistantId, "search", "Searching the docs", String(q));
+              } else if (payload.tool === "format_citations") {
+                const n = Array.isArray(payload.input?.sources)
+                  ? payload.input.sources.length
+                  : 0;
+                tracePush(
+                  assistantId,
+                  "cite",
+                  "Registering citations",
+                  n ? `${n} source${n > 1 ? "s" : ""}` : undefined,
+                );
               }
-              case "done":
-                dispatch({
-                  type: "patch",
-                  id: assistantId,
-                  patch: { streaming: false },
-                });
-                finalizeCitations(assistantId);
-                break;
-              case "error":
-                dispatch({
-                  type: "patch",
-                  id: assistantId,
-                  patch: { streaming: false, error: payload.message ?? "Unknown error" },
-                });
-                toast.error(payload.message ?? "Stream error");
-                break;
+              commitTrace(assistantId);
+              dispatch({
+                type: "patchMsg",
+                id: assistantId,
+                patch: { toolStatus: { tool: payload.tool, input: payload.input } },
+              });
+              break;
             }
+            case "tool_result":
+              // The most-recent running search/cite step just completed.
+              traceEndRunning(assistantId, ["search", "cite"]);
+              commitTrace(assistantId);
+              break;
+            case "token": {
+              const tok = payload.token ?? "";
+              if (!composeStarted) {
+                composeStarted = true;
+                traceEndRunning(assistantId, ["intent", "search", "cite"]);
+                tracePush(assistantId, "compose", "Writing the answer");
+                commitTrace(assistantId);
+              }
+              appendToken(assistantId, tok);
+              break;
+            }
+            case "done":
+              traceEndRunning(assistantId);
+              commitTrace(assistantId);
+              dispatch({ type: "patchMsg", id: assistantId, patch: { streaming: false } });
+              finalizeCitations(assistantId);
+              break;
+            case "sources": {
+              // Authoritative citation list from the agent's format_citations
+              // call — overrides the regex-extracted one.
+              const cites: Citation[] = (payload.sources ?? []).map(
+                (s: any, i: number, arr: any[]) => ({
+                  title: s.title,
+                  url: s.url,
+                  relevance: arr.length === 1 ? 1 : 1 - (i / (arr.length - 1)) * 0.7,
+                }),
+              );
+              if (cites.length) {
+                dispatch({ type: "patchMsg", id: assistantId, patch: { citations: cites } });
+              }
+              break;
+            }
+            case "error":
+              traceEndRunning(assistantId);
+              commitTrace(assistantId);
+              dispatch({
+                type: "patchMsg",
+                id: assistantId,
+                patch: { streaming: false, error: payload.message ?? "Unknown error" },
+              });
+              toast.error(payload.message ?? "Stream error");
+              break;
           }
         }
       } catch (err: any) {
         if (err?.name === "AbortError") return;
+        traceEndRunning(assistantId);
+        commitTrace(assistantId);
         dispatch({
-          type: "patch",
+          type: "patchMsg",
           id: assistantId,
           patch: {
             streaming: false,
@@ -222,7 +369,16 @@ export function ChatApp() {
         setStreaming(false);
       }
     },
-    [backendUrl, sessionId, streaming, appendToken, finalizeCitations],
+    [
+      backendUrl,
+      sessionId,
+      streaming,
+      appendToken,
+      finalizeCitations,
+      commitTrace,
+      traceEndRunning,
+      tracePush,
+    ],
   );
 
   const empty = messages.length === 0;
@@ -244,13 +400,13 @@ export function ChatApp() {
                   variant="ghost"
                   size="sm"
                   className="h-8 w-8 p-0"
-                  onClick={handleClear}
+                  onClick={handleNewChat}
                   disabled={messages.length === 0}
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Clear conversation</TooltipContent>
+              <TooltipContent>New chat</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -282,6 +438,14 @@ export function ChatApp() {
         </header>
 
         <div className="flex flex-1 min-h-0">
+          <Sidebar
+            conversations={state.conversations}
+            activeId={state.activeId}
+            onSelect={handleSelectChat}
+            onNewChat={handleNewChat}
+            onPickExample={(q) => send(q)}
+            busy={streaming}
+          />
           <main className="flex flex-1 flex-col min-w-0">
             <div ref={scrollRef} className="flex-1 overflow-y-auto">
               <div className="mx-auto w-full max-w-[800px] px-6">
@@ -330,7 +494,15 @@ function ConnectionPill({ connected }: { connected: boolean | null }) {
         : "text-destructive";
   return (
     <div className="hidden sm:flex items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 py-1 mr-1">
-      <span className={`h-1.5 w-1.5 rounded-full ${connected ? "bg-[oklch(0.7_0.16_150)]" : connected === false ? "bg-destructive" : "bg-muted-foreground"}`} />
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${
+          connected
+            ? "bg-[oklch(0.7_0.16_150)]"
+            : connected === false
+              ? "bg-destructive"
+              : "bg-muted-foreground"
+        }`}
+      />
       <span className={`text-[10px] font-mono ${color}`}>{label}</span>
     </div>
   );
@@ -347,20 +519,12 @@ function Welcome({ onPick }: { onPick: (q: string) => void }) {
         Ask anything about Anthropic's docs
       </h1>
       <p className="mt-2 max-w-md text-sm text-muted-foreground">
-        A focused chat agent grounded in the official developer documentation. Streamed answers, with citations.
+        A focused agent grounded in the official developer documentation. Watch it search,
+        re-rank, and cite — every answer is traceable.
       </p>
-      <div className="mt-10 grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2">
-        {EXAMPLES.map((q) => (
-          <button
-            key={q}
-            onClick={() => onPick(q)}
-            className="group rounded-lg border border-border bg-card p-3 text-left text-sm text-foreground/90 hover:border-primary/40 hover:bg-accent transition-colors"
-          >
-            {q}
-            <span className="ml-1 text-primary opacity-0 group-hover:opacity-100 transition-opacity">→</span>
-          </button>
-        ))}
-      </div>
+      <p className="mt-6 max-w-md text-xs text-muted-foreground/70">
+        Pick a question from the sidebar, or type your own below.
+      </p>
     </div>
   );
 }

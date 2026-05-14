@@ -3,9 +3,10 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
-import { Search, AlertCircle } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import type { Message } from "@/lib/types";
 import { extractCitations } from "@/lib/citations";
+import { AgentTrace } from "@/components/AgentTrace";
 
 interface Props {
   message: Message;
@@ -43,11 +44,9 @@ export function MessageBubble({ message, isDark }: Props) {
 
   return (
     <div ref={ref} className="group animate-fade-in">
-      {message.toolStatus && (
-        <div className="mb-3 inline-flex items-center gap-2 rounded-md border border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground font-mono">
-          <Search className="h-3.5 w-3.5 animate-pulse text-primary" />
-          Searching the docs…
-        </div>
+      {/* The signature view: the agent's tool-use loop, rendered live. */}
+      {message.trace && message.trace.length > 0 && (
+        <AgentTrace trace={message.trace} streaming={!!message.streaming} />
       )}
       <div className={`prose-msg ${message.streaming ? "streaming-cursor" : ""}`}>
         <ReactMarkdown
