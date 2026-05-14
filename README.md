@@ -7,6 +7,8 @@ Ask a question, watch the agent classify intent, search the indexed docs, re-ran
 the hits with an LLM-as-judge, and stream back a grounded answer with citations —
 every step visible in a live **Agent Trace** and inspectable down to the raw chunks.
 
+**Live app:** https://cloudemployee-test.lovable.app
+
 ---
 
 ## Repo layout
