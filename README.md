@@ -129,8 +129,7 @@ See **`api/README.md`** for the deeper write-up of the design decisions.
 
 ### Why two implementations?
 
-The deployed runtime is a Deno Edge Function — Supabase's native serverless model,
-the same pattern used in production at MAVRYX Assistant. The Claude Agent SDK has no
+The deployed runtime is a Deno Edge Function — Supabase's native serverless model. The Claude Agent SDK has no
 mature Deno build, so the Edge Function hand-rolls the tool-use loop against the
 Messages API. The Python `api/` package implements the *same* loop on the Claude
 Agent SDK — the "Managed Agent" deep-dive — so the two can be compared directly.
