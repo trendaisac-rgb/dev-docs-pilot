@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { Toaster, toast } from "sonner";
-import { Moon, Sun, Settings, Trash2 } from "lucide-react";
+import { Moon, Sun, Settings, Trash2, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { MessageBubble } from "@/components/MessageBubble";
@@ -29,7 +30,9 @@ type CAction =
   | { type: "addMsg"; message: Message }
   | { type: "patchMsg"; id: string; patch: Partial<Message> }
   | { type: "title"; title: string }
-  | { type: "session"; sessionId: string };
+  | { type: "session"; sessionId: string }
+  | { type: "rename"; id: string; title: string }
+  | { type: "delete"; id: string };
 
 function newConversation(): Conversation {
   return {
@@ -72,6 +75,24 @@ function reducer(state: CState, action: CAction): CState {
       }));
     case "session":
       return patchActive((c) => ({ ...c, sessionId: action.sessionId }));
+    case "rename":
+      return {
+        ...state,
+        conversations: state.conversations.map((c) =>
+          c.id === action.id ? { ...c, title: action.title } : c,
+        ),
+      };
+    case "delete": {
+      const remaining = state.conversations.filter((c) => c.id !== action.id);
+      // Never leave the app with zero conversations — seed a fresh one.
+      if (remaining.length === 0) {
+        const conv = newConversation();
+        return { conversations: [conv], activeId: conv.id };
+      }
+      const activeId =
+        state.activeId === action.id ? remaining[0].id : state.activeId;
+      return { conversations: remaining, activeId };
+    }
   }
 }
 
@@ -163,6 +184,24 @@ export function ChatApp() {
       dispatch({ type: "select", id });
     },
     [],
+  );
+
+  const handleRenameChat = useCallback((id: string, title: string) => {
+    const t = title.trim();
+    if (t) dispatch({ type: "rename", id, title: t.slice(0, 80) });
+  }, []);
+
+  const handleDeleteChat = useCallback(
+    (id: string) => {
+      // If we're deleting the conversation that's currently streaming,
+      // abort the in-flight request first.
+      if (state.activeId === id) {
+        abortRef.current?.abort();
+        setStreaming(false);
+      }
+      dispatch({ type: "delete", id });
+    },
+    [state.activeId],
   );
 
   // ── Token + trace accumulators (per assistant message id) ──────────
@@ -300,11 +339,26 @@ export function ChatApp() {
               });
               break;
             }
-            case "tool_result":
+            case "tool_result": {
               // The most-recent running search/cite step just completed.
+              // Attach the retrieval summary + chunks to that step BEFORE
+              // ending it, so the Retrieval Inspector has data to show.
+              const steps = traceRef.current.get(assistantId) ?? [];
+              for (let i = steps.length - 1; i >= 0; i--) {
+                const s = steps[i];
+                if (
+                  s.status === "running" &&
+                  (s.kind === "search" || s.kind === "cite")
+                ) {
+                  if (payload.detail) s.result = String(payload.detail);
+                  if (Array.isArray(payload.chunks)) s.chunks = payload.chunks;
+                  break;
+                }
+              }
               traceEndRunning(assistantId, ["search", "cite"]);
               commitTrace(assistantId);
               break;
+            }
             case "token": {
               const tok = payload.token ?? "";
               if (!composeStarted) {
@@ -396,6 +450,17 @@ export function ChatApp() {
             <ConnectionPill connected={connected} />
             <Tooltip>
               <TooltipTrigger asChild>
+                <Link
+                  to="/evals"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-foreground transition-colors hover:bg-accent"
+                >
+                  <BarChart3 className="h-4 w-4" />
+                </Link>
+              </TooltipTrigger>
+              <TooltipContent>Evaluation dashboard</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
                 <Button
                   variant="ghost"
                   size="sm"
@@ -444,6 +509,8 @@ export function ChatApp() {
             onSelect={handleSelectChat}
             onNewChat={handleNewChat}
             onPickExample={(q) => send(q)}
+            onRename={handleRenameChat}
+            onDelete={handleDeleteChat}
             busy={streaming}
           />
           <main className="flex flex-1 flex-col min-w-0">

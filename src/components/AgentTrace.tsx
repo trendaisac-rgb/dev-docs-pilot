@@ -8,8 +8,10 @@ import {
   ChevronDown,
   ChevronRight,
   Loader2,
+  Layers,
 } from "lucide-react";
 import type { TraceStep } from "@/lib/types";
+import { RetrievalInspector } from "@/components/RetrievalInspector";
 
 interface Props {
   trace: TraceStep[];
@@ -34,6 +36,10 @@ function stepDuration(step: TraceStep): string | null {
  * AgentTrace — the signature view. Renders the agent's tool-use loop as a
  * live timeline so the user *sees* it think: classify the question, decide
  * what to search for (and re-search when results are weak), then compose.
+ *
+ * Each search step can be expanded into a Retrieval Inspector — the actual
+ * chunks the retriever surfaced, with vector similarity vs. LLM-judge
+ * relevance side by side.
  *
  * Fed entirely by SSE events (tool_use / tool_result / token / done) — no
  * extra backend calls. Expanded while the agent runs; collapses to a
@@ -83,58 +89,90 @@ export function AgentTrace({ trace, streaming }: Props) {
 
       {expanded && (
         <ol className="px-3 pb-2.5 pt-0.5">
-          {trace.map((step, i) => {
-            const Icon = ICONS[step.kind];
-            const running = step.status === "running";
-            const dur = stepDuration(step);
-            return (
-              <li
-                key={step.id}
-                className="relative flex items-start gap-2.5 py-1 pl-1"
-              >
-                {/* connector line */}
-                {i < trace.length - 1 && (
-                  <span className="absolute left-[11px] top-[22px] h-[calc(100%-12px)] w-px bg-border" />
-                )}
-                {/* status dot / icon */}
-                <span
-                  className={`relative z-10 mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border ${
-                    running
-                      ? "border-primary/50 bg-primary/10"
-                      : "border-border bg-background"
-                  }`}
-                >
-                  {running ? (
-                    <Icon className="h-2.5 w-2.5 animate-pulse text-primary" />
-                  ) : (
-                    <Check className="h-2.5 w-2.5 text-[oklch(0.7_0.16_150)]" />
-                  )}
-                </span>
-                {/* label + detail */}
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline gap-2">
-                    <span
-                      className={`text-xs ${running ? "text-foreground" : "text-muted-foreground"}`}
-                    >
-                      {step.label}
-                    </span>
-                    {dur && (
-                      <span className="font-mono text-[10px] text-muted-foreground/60">
-                        {dur}
-                      </span>
-                    )}
-                  </div>
-                  {step.detail && (
-                    <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground/80">
-                      {step.kind === "search" ? `"${step.detail}"` : step.detail}
-                    </div>
-                  )}
-                </div>
-              </li>
-            );
-          })}
+          {trace.map((step, i) => (
+            <TraceStepRow
+              key={step.id}
+              step={step}
+              isLast={i === trace.length - 1}
+            />
+          ))}
         </ol>
       )}
     </div>
+  );
+}
+
+function TraceStepRow({ step, isLast }: { step: TraceStep; isLast: boolean }) {
+  const [showChunks, setShowChunks] = useState(false);
+  const Icon = ICONS[step.kind];
+  const running = step.status === "running";
+  const dur = stepDuration(step);
+  const hasChunks = !!step.chunks && step.chunks.length > 0;
+
+  return (
+    <li className="relative flex items-start gap-2.5 py-1 pl-1">
+      {/* connector line */}
+      {!isLast && (
+        <span className="absolute left-[11px] top-[22px] h-[calc(100%-12px)] w-px bg-border" />
+      )}
+      {/* status dot / icon */}
+      <span
+        className={`relative z-10 mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border ${
+          running
+            ? "border-primary/50 bg-primary/10"
+            : "border-border bg-background"
+        }`}
+      >
+        {running ? (
+          <Icon className="h-2.5 w-2.5 animate-pulse text-primary" />
+        ) : (
+          <Check className="h-2.5 w-2.5 text-[oklch(0.7_0.16_150)]" />
+        )}
+      </span>
+      {/* label + detail */}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <span
+            className={`text-xs ${running ? "text-foreground" : "text-muted-foreground"}`}
+          >
+            {step.label}
+          </span>
+          {dur && (
+            <span className="font-mono text-[10px] text-muted-foreground/60">
+              {dur}
+            </span>
+          )}
+        </div>
+        {step.detail && (
+          <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground/80">
+            {step.kind === "search" ? `"${step.detail}"` : step.detail}
+          </div>
+        )}
+        {/* post-retrieval summary: "8 chunks · top 0.95 · 6 reranked" */}
+        {step.result && (
+          <div className="mt-0.5 font-mono text-[10.5px] text-muted-foreground/60">
+            {step.result}
+          </div>
+        )}
+        {/* expandable Retrieval Inspector — the actual chunks + both scores */}
+        {hasChunks && (
+          <>
+            <button
+              onClick={() => setShowChunks((v) => !v)}
+              className="mt-1 inline-flex items-center gap-1 rounded border border-border bg-background/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+            >
+              <Layers className="h-2.5 w-2.5" />
+              {showChunks ? "hide retrieval" : "inspect retrieval"}
+              {showChunks ? (
+                <ChevronDown className="h-2.5 w-2.5" />
+              ) : (
+                <ChevronRight className="h-2.5 w-2.5" />
+              )}
+            </button>
+            {showChunks && <RetrievalInspector chunks={step.chunks!} />}
+          </>
+        )}
+      </div>
+    </li>
   );
 }

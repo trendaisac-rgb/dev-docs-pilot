@@ -207,6 +207,10 @@ interface Chunk {
   title: string;
   section: string;
   anchor: string;
+  // Set by rerank() for chunks the LLM-as-judge actually scored. Lets the
+  // UI show *why* a chunk ranked where it did: raw vector similarity vs.
+  // the judge's sufficiency relevance.
+  rerankRelevance?: number;
 }
 
 const EMBED_MODEL = Deno.env.get("EMBED_MODEL") ?? "text-embedding-3-small";
@@ -282,16 +286,20 @@ async function rerank(opts: {
   client: Anthropic;
   maxToJudge?: number;
   chunkCharLimit?: number;
-}): Promise<{ chunks: Chunk[]; anySufficient: boolean }> {
+}): Promise<{ chunks: Chunk[]; anySufficient: boolean; shortcut: boolean }> {
   const { query, chunks, client } = opts;
   const maxToJudge = opts.maxToJudge ?? 6;
   const chunkCharLimit = opts.chunkCharLimit ?? 700;
 
-  if (chunks.length === 0) return { chunks: [], anySufficient: false };
+  if (chunks.length === 0) {
+    return { chunks: [], anySufficient: false, shortcut: false };
+  }
 
   // Short-circuit: top chunk already above high-confidence threshold.
+  // We skip the judge entirely — the UI surfaces this as a "shortcut" so
+  // the reasoning stays visible.
   if (chunks[0].similarity >= KB_HIGH_CONFIDENCE_SIM) {
-    return { chunks, anySufficient: true };
+    return { chunks, anySufficient: true, shortcut: true };
   }
 
   const judging = chunks.slice(0, maxToJudge);
@@ -335,6 +343,9 @@ async function rerank(opts: {
     const rescored: Array<[number, Chunk]> = judging.map((c, i) => {
       const j = judgments.get(i);
       if (j && typeof j.relevance === "number") {
+        // Record the judge's verdict on the chunk itself so the UI can show
+        // the vector-similarity vs. judge-relevance split.
+        c.rerankRelevance = j.relevance;
         // Blend judge relevance with vector similarity, 0.7/0.3 toward judge.
         return [0.7 * j.relevance + 0.3 * c.similarity, c];
       }
@@ -348,11 +359,12 @@ async function rerank(opts: {
     return {
       chunks: [...sorted, ...tail],
       anySufficient: parsed.any_sufficient !== false,
+      shortcut: false,
     };
   } catch (err) {
     // Fail-open: a transient API hiccup shouldn't silently drop chunks.
     console.warn("reranker failed, returning un-reranked order:", err);
-    return { chunks, anySufficient: true };
+    return { chunks, anySufficient: true, shortcut: false };
   }
 }
 
@@ -423,7 +435,12 @@ interface ToolDeps {
 async function runSearchKnowledgeBase(
   input: { query: string; top_k?: number },
   deps: ToolDeps,
-): Promise<{ payload: object; chunks: Chunk[] }> {
+): Promise<{
+  payload: object;
+  chunks: Chunk[];
+  anySufficient: boolean;
+  shortcut: boolean;
+}> {
   const query = input.query;
   const topK = input.top_k ?? RAG_MATCH_COUNT;
 
@@ -434,7 +451,7 @@ async function runSearchKnowledgeBase(
     matchCount: topK,
     docFamily: DEFAULT_DOC_FAMILY,
   });
-  const { chunks, anySufficient } = await rerank({
+  const { chunks, anySufficient, shortcut } = await rerank({
     query,
     chunks: raw,
     client: deps.anthropic,
@@ -456,7 +473,7 @@ async function runSearchKnowledgeBase(
       : "any_sufficient=false — none of the chunks contains a specific answer. Consider clarifying or acknowledging the gap.",
   };
 
-  return { payload, chunks };
+  return { payload, chunks, anySufficient, shortcut };
 }
 
 function runFormatCitations(input: {
@@ -482,12 +499,65 @@ function runFormatCitations(input: {
   return { payload, sources: deduped };
 }
 
+// A compact view of a retrieved chunk, surfaced to the client so the UI
+// can render a "Retrieval Inspector" — the actual chunks the agent saw,
+// with both their raw vector similarity and the LLM-as-judge relevance.
+interface InspectChunk {
+  title: string;
+  section: string;
+  url: string;
+  similarity: number;
+  rerankRelevance?: number;
+  content: string;
+}
+
 type AgentEvent =
   | { kind: "text"; text: string }
   | { kind: "tool_use"; tool: string; input: Record<string, unknown> }
-  | { kind: "tool_result"; tool: string }
+  | {
+      kind: "tool_result";
+      tool: string;
+      detail?: string;
+      chunks?: InspectChunk[];
+    }
   | { kind: "done"; sources: Array<{ title: string; url: string }> }
   | { kind: "error"; message: string };
+
+// Build a one-line summary of a retrieval result for the agent trace, e.g.
+// "8 chunks · top 0.95 · 6 reranked" or "8 chunks · top 0.81 · shortcut".
+function retrievalDetail(opts: {
+  chunks: Chunk[];
+  anySufficient: boolean;
+  shortcut: boolean;
+}): string {
+  const { chunks, anySufficient, shortcut } = opts;
+  if (chunks.length === 0) return "no chunks found";
+  const top = chunks[0];
+  const topScore = top.rerankRelevance ?? top.similarity;
+  const parts = [`${chunks.length} chunks`, `top ${topScore.toFixed(2)}`];
+  if (shortcut) {
+    parts.push("high-confidence shortcut");
+  } else {
+    const judged = chunks.filter((c) => c.rerankRelevance !== undefined).length;
+    if (judged > 0) parts.push(`${judged} reranked`);
+    if (!anySufficient) parts.push("no strong match");
+  }
+  return parts.join(" · ");
+}
+
+function inspectChunks(chunks: Chunk[]): InspectChunk[] {
+  return chunks.slice(0, 8).map((c) => ({
+    title: c.title,
+    section: c.section,
+    url: chunkCitationUrl(c),
+    similarity: Number(c.similarity.toFixed(3)),
+    rerankRelevance:
+      c.rerankRelevance !== undefined
+        ? Number(c.rerankRelevance.toFixed(3))
+        : undefined,
+    content: c.content.slice(0, 600),
+  }));
+}
 
 async function* runAgent(opts: {
   question: string;
@@ -551,10 +621,11 @@ async function* runAgent(opts: {
 
       try {
         if (toolName === "search_knowledge_base") {
-          const { payload, chunks } = await runSearchKnowledgeBase(
-            toolInput as { query: string; top_k?: number },
-            deps,
-          );
+          const { payload, chunks, anySufficient, shortcut } =
+            await runSearchKnowledgeBase(
+              toolInput as { query: string; top_k?: number },
+              deps,
+            );
           for (const c of chunks) {
             const url = chunkCitationUrl(c);
             if (!seenSources.has(url)) {
@@ -566,7 +637,12 @@ async function* runAgent(opts: {
             tool_use_id: block.id,
             content: JSON.stringify(payload, null, 2),
           });
-          yield { kind: "tool_result", tool: toolName };
+          yield {
+            kind: "tool_result",
+            tool: toolName,
+            detail: retrievalDetail({ chunks, anySufficient, shortcut }),
+            chunks: inspectChunks(chunks),
+          };
         } else if (toolName === "format_citations") {
           const { payload, sources } = runFormatCitations(
             toolInput as { sources: Array<{ title?: string; url: string }> },
@@ -583,7 +659,11 @@ async function* runAgent(opts: {
             tool_use_id: block.id,
             content: payload,
           });
-          yield { kind: "tool_result", tool: toolName };
+          yield {
+            kind: "tool_result",
+            tool: toolName,
+            detail: `${sources.length} source${sources.length === 1 ? "" : "s"} registered`,
+          };
         } else {
           toolResults.push({
             type: "tool_result",
@@ -738,7 +818,11 @@ Deno.serve(async (req: Request) => {
           } else if (ev.kind === "tool_use") {
             send("tool_use", { tool: ev.tool, input: ev.input });
           } else if (ev.kind === "tool_result") {
-            send("tool_result", { tool: ev.tool });
+            send("tool_result", {
+              tool: ev.tool,
+              detail: ev.detail,
+              chunks: ev.chunks,
+            });
           } else if (ev.kind === "done") {
             send("sources", { sources: ev.sources });
             send("done", { intent: "answer" });

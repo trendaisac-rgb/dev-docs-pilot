@@ -1,5 +1,19 @@
-import { Plus, MessageSquare, Sparkles } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import {
+  Plus,
+  MessageSquare,
+  Sparkles,
+  MoreVertical,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import type { Conversation } from "@/lib/types";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const EXAMPLES = [
   "How do I stream a response from the Messages API in Python?",
@@ -14,6 +28,8 @@ interface Props {
   onSelect: (id: string) => void;
   onNewChat: () => void;
   onPickExample: (question: string) => void;
+  onRename: (id: string, title: string) => void;
+  onDelete: (id: string) => void;
   busy: boolean;
 }
 
@@ -22,6 +38,8 @@ interface Props {
  * questions. History is in-memory for the session (the Edge Function is
  * stateless), which is enough for a working demo and avoids browser
  * storage entirely.
+ *
+ * Each history row has a hover ⋮ menu to rename (inline edit) or delete.
  */
 export function Sidebar({
   conversations,
@@ -29,8 +47,13 @@ export function Sidebar({
   onSelect,
   onNewChat,
   onPickExample,
+  onRename,
+  onDelete,
   busy,
 }: Props) {
+  // Which conversation is currently being renamed inline (if any).
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+
   return (
     <aside className="hidden md:flex w-60 shrink-0 flex-col border-r border-border bg-muted/20">
       {/* New chat */}
@@ -54,19 +77,20 @@ export function Sidebar({
             </div>
             <ul className="space-y-0.5">
               {conversations.map((c) => (
-                <li key={c.id}>
-                  <button
-                    onClick={() => onSelect(c.id)}
-                    className={`flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
-                      c.id === activeId
-                        ? "bg-accent text-foreground"
-                        : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-                    }`}
-                  >
-                    <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-60" />
-                    <span className="line-clamp-2 leading-snug">{c.title}</span>
-                  </button>
-                </li>
+                <ConversationRow
+                  key={c.id}
+                  conversation={c}
+                  active={c.id === activeId}
+                  renaming={renamingId === c.id}
+                  onSelect={() => onSelect(c.id)}
+                  onStartRename={() => setRenamingId(c.id)}
+                  onCommitRename={(title) => {
+                    onRename(c.id, title);
+                    setRenamingId(null);
+                  }}
+                  onCancelRename={() => setRenamingId(null)}
+                  onDelete={() => onDelete(c.id)}
+                />
               ))}
             </ul>
           </>
@@ -94,5 +118,119 @@ export function Sidebar({
         </ul>
       </div>
     </aside>
+  );
+}
+
+interface RowProps {
+  conversation: Conversation;
+  active: boolean;
+  renaming: boolean;
+  onSelect: () => void;
+  onStartRename: () => void;
+  onCommitRename: (title: string) => void;
+  onCancelRename: () => void;
+  onDelete: () => void;
+}
+
+function ConversationRow({
+  conversation: c,
+  active,
+  renaming,
+  onSelect,
+  onStartRename,
+  onCommitRename,
+  onCancelRename,
+  onDelete,
+}: RowProps) {
+  const [draft, setDraft] = useState(c.title);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // When rename mode opens, seed the draft and focus/select the input.
+  useEffect(() => {
+    if (renaming) {
+      setDraft(c.title);
+      // Focus after the input has mounted.
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      });
+    }
+  }, [renaming, c.title]);
+
+  if (renaming) {
+    return (
+      <li>
+        <input
+          ref={inputRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onCommitRename(draft);
+            if (e.key === "Escape") onCancelRename();
+          }}
+          onBlur={() => onCommitRename(draft)}
+          className="w-full rounded-md border border-primary/50 bg-card px-2 py-1.5 text-xs text-foreground outline-none"
+        />
+      </li>
+    );
+  }
+
+  return (
+    <li>
+      <div
+        className={`group/row flex items-center gap-1 rounded-md pr-1 transition-colors ${
+          active
+            ? "bg-accent"
+            : "hover:bg-muted/60"
+        }`}
+      >
+        <button
+          onClick={onSelect}
+          className={`flex min-w-0 flex-1 items-start gap-2 px-2 py-1.5 text-left text-xs transition-colors ${
+            active ? "text-foreground" : "text-muted-foreground"
+          }`}
+        >
+          <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-60" />
+          <span className="line-clamp-2 leading-snug">{c.title}</span>
+        </button>
+
+        <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+          <DropdownMenuTrigger asChild>
+            <button
+              aria-label="Chat options"
+              className={`shrink-0 rounded p-1 text-muted-foreground transition-all hover:bg-background hover:text-foreground ${
+                menuOpen
+                  ? "opacity-100"
+                  : "opacity-0 group-hover/row:opacity-100"
+              }`}
+            >
+              <MoreVertical className="h-3.5 w-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-36">
+            <DropdownMenuItem
+              onClick={() => {
+                setMenuOpen(false);
+                onStartRename();
+              }}
+            >
+              <Pencil className="mr-2 h-3.5 w-3.5" />
+              Rename
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                setMenuOpen(false);
+                onDelete();
+              }}
+              className="text-destructive focus:text-destructive"
+            >
+              <Trash2 className="mr-2 h-3.5 w-3.5" />
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </li>
   );
 }
