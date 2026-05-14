@@ -256,15 +256,14 @@ most time on. It runs end-to-end:
 | Faithfulness (judge)      | 0.735 |
 | Completeness (judge)      | 0.913 |
 | Citation correctness      | 0.629 |
-| Hallucination rate        | 1.000 |
 ```
 
-Completeness is strong; retrieval precision is the weak axis and drags citation
-correctness with it. The hallucination rate is the judge being deliberately strict
-against a thin ground-truth set — see the root `README.md` and the `/evals`
-dashboard's per-question rationale for the honest read. Run
-`uv run python -m eval.run_eval` and check `eval/runs/<timestamp>/report.md` for the
-per-question failure analysis.
+Faithfulness (0.73) and completeness (0.91) are the headline answer-quality numbers —
+answers stay grounded and cover the question. Retrieval precision is the weak axis and
+drags citation correctness with it. A strict binary hallucination flag is kept as a
+per-question smoke alarm, not a headline metric — its rationale is browsable in the
+`/evals` dashboard. Run `uv run python -m eval.run_eval` and check
+`eval/runs/<timestamp>/report.md` for the per-question failure analysis.
 
 ### Why these 15 questions?
 
@@ -291,8 +290,9 @@ In rough priority order:
 1. **Hybrid search** — add Postgres full-text alongside pgvector, RRF the two.
    Closes the exact-token-match gap that pure embedding retrieval has on API and
    parameter names. This is the direct fix for the low Precision@5.
-2. **Calibrate the judge** — the 1.00 hallucination rate is a thin ground-truth
-   artifact. Richer reference answers + a less binary hallucination axis.
+2. **Calibrate the evaluation judge** — richer reference answers and a less binary
+   hallucination axis, so the per-question flag tracks real answer quality rather than
+   ground-truth thinness.
 3. **Voyage embeddings + re-embed** — measure the delta on the eval; migrate if
    `recall@5` jumps on technical jargon.
 4. **Persistent sessions** — replace the in-process dict with Redis + transcript

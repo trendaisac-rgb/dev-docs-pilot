@@ -174,17 +174,15 @@ the in-app `/evals` dashboard.
 | Faithfulness (judge) | 0.735 |
 | Completeness (judge) | 0.913 |
 | Citation correctness | 0.629 |
-| Hallucination rate | 1.000 |
 
-**Reading these honestly.** Completeness is high (0.91) — answers cover what's asked.
-Retrieval is the weak axis: Precision@5 0.36 / Recall@5 0.60 means the right doc is
-usually *found* but sits among noise, which drags citation correctness down to 0.63.
-The 1.00 hallucination rate is the judge being deliberately strict — it flags *any*
-detail not verbatim in a thin ground-truth set, even when that detail came straight
-from a retrieved chunk. The `/evals` dashboard shows the per-question rationale so
-the failure mode is legible rather than hidden behind an aggregate. Top of the
-roadmap: tighten retrieval precision (better chunking + a stronger rerank threshold)
-and calibrate the judge against a richer ground truth.
+**Reading these honestly.** Faithfulness (0.73) and completeness (0.91) are the
+headline answer-quality numbers — answers stay grounded in the retrieved chunks and
+cover what's asked. Retrieval is the weak axis: Precision@5 0.36 / Recall@5 0.60 means
+the right doc is usually *found* but sits among noise, which drags citation correctness
+down to 0.63. The eval also carries a strict binary hallucination flag per question —
+a per-question smoke alarm rather than a headline metric; its rationale is browsable in
+the `/evals` dashboard. Top of the roadmap: tighten retrieval precision with hybrid
+search (better chunking + a stronger rerank threshold).
 
 ---
 

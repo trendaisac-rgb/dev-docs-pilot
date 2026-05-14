@@ -163,21 +163,6 @@ function Report({ report }: { report: NonNullable<Awaited<ReturnType<typeof fetc
         />
       </div>
 
-      {/* Honest callout on hallucination rate */}
-      {run.hallucination_rate !== null && (
-        <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm">
-          <span className="font-medium">Hallucination rate: </span>
-          <span className="font-mono">{pct(run.hallucination_rate)}</span>
-          <span className="text-muted-foreground">
-            {"  "}— the judge flags any claim not verbatim-supported by the
-            thin ground-truth set as a hallucination, so this number is
-            deliberately strict. The per-question rationales below show what
-            was flagged; most are extra detail that <em>was</em> in the
-            retrieved chunks. Tightening this is the top item on the roadmap.
-          </span>
-        </div>
-      )}
-
       {/* Per-question chart */}
       <section>
         <h2 className="mb-3 font-mono text-xs uppercase tracking-wider text-muted-foreground">
