@@ -1,5 +1,5 @@
 """
-Insert all 1,612 document chunks into Supabase from local JSON batches.
+Insert all document chunks into Supabase from local JSON batches.
 
 Run this locally with SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in env.
 The MCP-based ingestion via the agent context is not feasible because the
